@@ -1,0 +1,13 @@
+# Lumexa Electronics Design Service — requirements
+# Kept deliberately minimal: this deploys on Render's free tier (512MB RAM),
+# the same constraint that forced the split between main.py and
+# analysis_service.py in the CAD/FEA repo. No networkx, no scipy, no torch —
+# the wire router below is a plain heapq A* over a numpy bool grid, and the
+# AI call is a direct urllib POST (same pattern as the existing repo's
+# _openrouter_request), so nothing heavier than this is needed.
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+trimesh==4.4.9
+numpy==1.26.4

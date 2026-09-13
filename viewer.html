@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Lumexa Electronics — X-Ray Viewer</title>
+<style>
+  :root {
+    --bg: #0b0d10; --panel: #14171c; --border: #262b33; --text: #e6e9ee;
+    --muted: #8b93a1; --accent: #4fd1c5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; }
+  #viewport { position: fixed; inset: 0; }
+  #panel {
+    position: fixed; top: 0; right: 0; width: 340px; height: 100%; background: var(--panel);
+    border-left: 1px solid var(--border); padding: 16px; overflow-y: auto; font-size: 13px;
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; }
+  #panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .section { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+  .section h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin: 0 0 8px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .row label { color: var(--muted); }
+  input[type="range"] { width: 130px; accent-color: var(--accent); }
+  .part {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+    cursor: pointer; margin-bottom: 4px;
+  }
+  .part:hover { background: #1c2028; }
+  .part.selected { background: #1f2b2a; outline: 1px solid var(--accent); }
+  .badge {
+    width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; display: flex;
+    align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
+    color: #0b0d10; text-shadow: 0 0 2px rgba(255,255,255,0.4);
+  }
+  .part .name { flex: 1; }
+  .part .meta { color: var(--muted); font-size: 11px; }
+  .wire-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+  .wire-row .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; border: 1px solid #444; }
+  .wire-row .wlabel { color: var(--muted); width: 22px; flex-shrink: 0; }
+  .wire-row .len { margin-left: auto; color: var(--muted); }
+  .status-ok { color: #4fd18a; } .status-bad { color: #e05a5a; }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .legend-row .dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid #444; }
+  #info { position: fixed; left: 12px; bottom: 12px; color: var(--muted); font-size: 11px; }
+  #dropHint {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px; pointer-events: none;
+  }
+  #loading { position: fixed; top: 12px; left: 12px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <div id="viewport"></div>
+  <div id="dropHint">Drop a .glb here, or open with ?design_id=&lt;id&gt;</div>
+  <div id="loading"></div>
+  <div id="info">drag to orbit · scroll to zoom · click a part to highlight</div>
+
+  <div id="panel">
+    <h1>Lumexa Electronics</h1>
+    <div class="sub" id="deviceLine">No design loaded</div>
+
+    <div class="section">
+      <h2>X-Ray Shell</h2>
+      <div class="row"><label>Opacity</label>
+        <input type="range" id="shellOpacity" min="0" max="100" value="24" /></div>
+      <div class="row"><label>Show shell</label>
+        <input type="checkbox" id="shellVisible" checked /></div>
+      <div class="row"><label>Cross-section (Y)</label>
+        <input type="checkbox" id="clipEnabled" /></div>
+      <div class="row"><label>Clip plane</label>
+        <input type="range" id="clipOffset" min="-100" max="100" value="0" /></div>
+    </div>
+
+    <div class="section">
+      <h2>Overlays</h2>
+      <div class="row"><label>Mount areas on shell</label>
+        <input type="checkbox" id="mountAreaVisible" checked /></div>
+      <div class="row"><label>Area labels (A, B, C…)</label>
+        <input type="checkbox" id="labelsVisible" checked /></div>
+    </div>
+
+    <div class="section">
+      <h2>Components — one area &amp; color each</h2>
+      <div id="componentList"></div>
+    </div>
+
+    <div class="section">
+      <h2>Wires — colored to match real wiring convention</h2>
+      <div id="wireLegend"></div>
+      <div id="wireList" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const viewport = document.getElementById("viewport");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.localClippingEnabled = true;
+viewport.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d10);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+camera.position.set(150, 120, 150);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const key = new THREE.DirectionalLight(0xffffff, 0.9);
+key.position.set(1, 2, 1);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+fill.position.set(-1, -1, -1);
+scene.add(fill);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---- state -----------------------------------------------------------
+let shellMeshes = [];
+let componentMeshes = {};   // instance_id -> mesh
+let mountAreaMeshes = {};   // instance_id -> mesh
+let wireMeshes = {};        // key -> { mesh, category }
+let labelSprites = [];      // [{sprite, instance_id}]
+let clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+let manifest = null;
+let glbReady = false, manifestReady = false;
+
+function setLoading(msg) { document.getElementById("loading").textContent = msg || ""; }
+function rgbaToCss(rgba) { return `rgba(${rgba[0]},${rgba[1]},${rgba[2]},${(rgba[3] ?? 255) / 255})`; }
+function rgbaToHex(rgba) {
+  return "#" + rgba.slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+function parseName(name) {
+  const parts = (name || "").split("::");
+  return { kind: parts[0] || "", a: parts[1] || "", b: parts[2] || "" };
+}
+
+function frameCameraOnObject(root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3()).length();
+  const center = box.getCenter(new THREE.Vector3());
+  controls.target.copy(center);
+  const dist = Math.max(size, 10) * 1.4;
+  camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist * 0.8, dist)));
+  camera.near = dist / 100; camera.far = dist * 20;
+  camera.updateProjectionMatrix();
+}
+
+function applyShellMaterial(mesh) {
+  mesh.material = new THREE.MeshStandardMaterial({
+    color: 0xc8d2dc, transparent: true, opacity: 0.24, depthWrite: false,
+    side: THREE.DoubleSide, clippingPlanes: [], vertexColors: false,
+  });
+}
+
+function applyMountAreaMaterial(mesh) {
+  // vertex-colored already (baked per-component color in export_scene.py) —
+  // just make sure it renders both-sided and slightly emissive so it reads
+  // clearly as a decal rather than a shaded solid.
+  mesh.material = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false,
+  });
+}
+
+function loadGLB(url) {
+  setLoading("Loading scene…");
+  const loader = new GLTFLoader();
+  loader.load(url, (gltf) => {
+    [...scene.children].forEach((c) => { if (c.userData.__loaded) scene.remove(c); });
+    shellMeshes = []; componentMeshes = {}; mountAreaMeshes = {}; wireMeshes = {};
+
+    const root = gltf.scene;
+    root.userData.__loaded = true;
+    root.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const { kind, a, b } = parseName(obj.name);
+      if (kind === "cad_shell") {
+        applyShellMaterial(obj);
+        shellMeshes.push(obj);
+      } else if (kind === "component") {
+        componentMeshes[a] = obj;
+        obj.userData.category = b;
+      } else if (kind === "mountarea") {
+        applyMountAreaMaterial(obj);
+        mountAreaMeshes[a] = obj;
+      } else if (kind === "wire") {
+        wireMeshes[a] = { mesh: obj, category: b };
+      }
+    });
+    scene.add(root);
+    frameCameraOnObject(root);
+    document.getElementById("dropHint").style.display = "none";
+    setLoading("");
+    glbReady = true;
+    if (manifestReady) buildLabelSprites();
+  }, undefined, (err) => {
+    console.error(err);
+    setLoading("Couldn't load this design's 3D scene — it may have expired, been evicted "
+               + "(this demo server only keeps the last 20), or the server restarted. Try "
+               + "generating the design again.");
+  });
+}
+
+async function loadManifest(url) {
+  try {
+    const resp = await fetch(url);
+    manifest = await resp.json();
+    renderPanel();
+    manifestReady = true;
+    if (glbReady) buildLabelSprites();
+  } catch (e) {
+    console.warn("No manifest available:", e);
+    document.getElementById("deviceLine").textContent =
+      "No design data found for this ID — it may have expired or the server restarted.";
+  }
+}
+
+// ---- floating "area A / B / C" labels -----------------------------------
+function makeTextSprite(text, rgba) {
+  const size = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
+  ctx.fillStyle = rgbaToCss(rgba);
+  ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.stroke();
+  ctx.fillStyle = "#0b0d10";
+  ctx.font = "bold 44px -apple-system, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, size / 2, size / 2 + 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(material);
+  sprite.renderOrder = 999;
+  return sprite;
+}
+
+function buildLabelSprites() {
+  labelSprites.forEach((s) => scene.remove(s.sprite));
+  labelSprites = [];
+  if (!manifest) return;
+  manifest.components.forEach((c) => {
+    const sprite = makeTextSprite(c.label, c.color_rgba);
+    const topZ = c.center_mm[2] + 20;   // hover above the component
+    sprite.position.set(c.center_mm[0], c.center_mm[1], topZ);
+    const scale = 14;
+    sprite.scale.set(scale, scale, 1);
+    scene.add(sprite);
+    labelSprites.push({ sprite, instance_id: c.instance_id });
+  });
+  document.getElementById("labelsVisible").dispatchEvent(new Event("change"));
+}
+
+function renderPanel() {
+  if (!manifest) return;
+  document.getElementById("deviceLine").textContent =
+    `${manifest.device_type} · ${manifest.total_mass_g}g · ` +
+    `${manifest.finalized ? "finalized" : "in progress"}`;
+
+  const list = document.getElementById("componentList");
+  list.innerHTML = "";
+  manifest.components.forEach((c) => {
+    const el = document.createElement("div");
+    el.className = "part"; el.dataset.instanceId = c.instance_id;
+    el.innerHTML = `<span class="badge" style="background:${rgbaToCss(c.color_rgba)}">${c.label}</span>
+      <span class="name">${c.instance_id}</span><span class="meta">${c.mass_g}g</span>`;
+    el.onclick = () => focusComponent(c.instance_id, el);
+    list.appendChild(el);
+  });
+
+  const legend = document.getElementById("wireLegend");
+  legend.innerHTML = "";
+  const legendNotes = {
+    power: "red — universal DC positive convention",
+    ground: "black — universal DC negative/ground",
+    signal: "white — common ESC/servo PWM signal convention (some brands use yellow/orange)",
+    data_bus: "blue — UART/telemetry; no true universal standard, check your actual cable",
+  };
+  Object.entries(manifest.wire_color_legend || {}).forEach(([cat, rgba]) => {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML = `<input type="checkbox" class="wireToggle" data-cat="${cat}" checked />
+      <span class="dot" style="background:${rgbaToCss(rgba)}"></span>
+      <span>${cat}: ${legendNotes[cat] || ""}</span>`;
+    row.querySelector(".wireToggle").addEventListener("change", (e) => {
+      Object.values(wireMeshes).forEach((w) => { if (w.category === cat) w.mesh.visible = e.target.checked; });
+    });
+    legend.appendChild(row);
+  });
+
+  const wireList = document.getElementById("wireList");
+  wireList.innerHTML = "";
+  manifest.connections.forEach((c) => {
+    const ok = c.status === "routed";
+    const row = document.createElement("div");
+    row.className = "wire-row";
+    row.innerHTML = `<span class="dot" style="background:${rgbaToCss(c.color_rgba)}"></span>
+      <span class="wlabel">${c.label}</span>
+      <span class="${ok ? "status-ok" : "status-bad"}">${ok ? "●" : "✕"}</span>
+      <span>${c.from} → ${c.to}</span>
+      <span class="len">${ok ? c.length_mm + "mm" : "unrouted"}</span>`;
+    wireList.appendChild(row);
+  });
+}
+
+function focusComponent(instanceId, el) {
+  document.querySelectorAll(".part").forEach((p) => p.classList.remove("selected"));
+  if (el) el.classList.add("selected");
+  const mesh = componentMeshes[instanceId];
+  if (!mesh) return;
+  const box = new THREE.Box3().setFromObject(mesh);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3()).length();
+  controls.target.copy(center);
+  const dist = Math.max(size * 3, 20);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  camera.position.copy(center.clone().add(dir.multiplyScalar(dist)));
+}
+
+// ---- controls ----------------------------------------------------------
+document.getElementById("shellOpacity").addEventListener("input", (e) => {
+  const v = Number(e.target.value) / 100;
+  shellMeshes.forEach((m) => { m.material.opacity = v; });
+});
+document.getElementById("shellVisible").addEventListener("change", (e) => {
+  shellMeshes.forEach((m) => { m.visible = e.target.checked; });
+});
+document.getElementById("clipEnabled").addEventListener("change", (e) => {
+  const planes = e.target.checked ? [clipPlane] : [];
+  [...shellMeshes, ...Object.values(componentMeshes), ...Object.values(mountAreaMeshes)].forEach((m) => {
+    if (m.material) m.material.clippingPlanes = planes;
+  });
+});
+document.getElementById("clipOffset").addEventListener("input", (e) => {
+  clipPlane.constant = Number(e.target.value);
+});
+document.getElementById("mountAreaVisible").addEventListener("change", (e) => {
+  Object.values(mountAreaMeshes).forEach((m) => { m.visible = e.target.checked; });
+});
+document.getElementById("labelsVisible").addEventListener("change", (e) => {
+  labelSprites.forEach((s) => { s.sprite.visible = e.target.checked; });
+});
+
+// drag & drop a .glb for local testing without a running server
+viewport.addEventListener("dragover", (e) => e.preventDefault());
+viewport.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) loadGLB(URL.createObjectURL(file));
+});
+
+// ---- entry point ---------------------------------------------------------
+const params = new URLSearchParams(window.location.search);
+const designId = params.get("design_id");
+if (designId) {
+  loadGLB(`/designs/${designId}/scene.glb`);
+  loadManifest(`/designs/${designId}/manifest.json`);
+} else {
+  setLoading("");
+}
+</script>
+</body>
+</html>

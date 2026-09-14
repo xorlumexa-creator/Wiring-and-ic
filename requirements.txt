@@ -1,13 +1,22 @@
 # Lumexa Electronics Design Service — requirements
-# Kept deliberately minimal: this deploys on Render's free tier (512MB RAM),
-# the same constraint that forced the split between main.py and
-# analysis_service.py in the CAD/FEA repo. No networkx, no scipy, no torch —
-# the wire router below is a plain heapq A* over a numpy bool grid, and the
-# AI call is a direct urllib POST (same pattern as the existing repo's
-# _openrouter_request), so nothing heavier than this is needed.
+#
+# rtree and scipy are NOT optional here, despite trimesh listing them as
+# "soft" dependencies: spatial.py calls trimesh.proximity.signed_distance,
+# which internally needs mesh.contains() for the inside/outside test, and
+# that hard-fails with "ModuleNotFoundError: No module named 'rtree'" if
+# rtree isn't installed (confirmed against trimesh's own issue tracker —
+# this bit me in this exact codebase before I caught it). scipy backs
+# some of trimesh's proximity/graph operations and is worth having for
+# the same reason. Both ship self-contained manylinux wheels with their
+# native bits bundled (rtree bundles libspatialindex, no apt-get needed)
+# so this still installs cleanly on Render's plain Python buildpack — no
+# Dockerfile required for this service, unlike lumexa-ic which needs one
+# for Yosys/Verilator (those have no pip wheel option at all).
 
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 trimesh==4.4.9
 numpy==1.26.4
+rtree==1.3.0
+scipy==1.14.1

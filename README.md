@@ -212,6 +212,13 @@ here's exactly what was checked and fixed:
 - **Mesh loading failures now return a clean 422**, not an opaque
   unhandled 500 — a corrupt/unsupported STL is a caller error, not a
   server error, and should read like one.
+- **`rtree` was missing from requirements.txt — a real, silent crash risk,
+  not just a hardening nitpick.** trimesh lists it as a "soft" dependency,
+  but `spatial.py`'s `signed_distance` call needs `mesh.contains()`
+  internally, which hard-fails with `ModuleNotFoundError: No module named
+  'rtree'` without it. Added, along with `scipy` (same category of
+  trimesh-internal soft dependency). Both ship self-contained wheels, so
+  this still doesn't need a Dockerfile — see requirements.txt's comment.
 - Re-ran the full deterministic test suite after every change above
   (`test_astar_logic.py`, `test_spatial_logic.py` — now 6 cases including
   2 new regressions, `test_agent_tools_integration.py`) — all pass.

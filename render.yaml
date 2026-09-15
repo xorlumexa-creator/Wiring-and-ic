@@ -6,6 +6,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8                        # WITHOUT this, Render defaults to its newest Python (3.14 as of writing) — scipy/numpy/rtree don't have prebuilt wheels for that yet, forcing a from-source build that needs gfortran (not installed) and fails. This is the actual fix for the build_failed error hit on first deploy.
       - key: AI_PROVIDER
         value: groq                          # matches the rest of the Lumexa stack (CAD/FEA backend also runs GPT-OSS-120B via Groq)
       - key: GROQ_API_KEY

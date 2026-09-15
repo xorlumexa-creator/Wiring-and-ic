@@ -1,16 +1,20 @@
 services:
   - type: web
     name: lumexa-electronics
-    env: python
+    env: python                              # plain buildpack — no Dockerfile needed, see requirements.txt's comment
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: AI_PROVIDER
-        value: openrouter
-      - key: OPENROUTER_API_KEY
-        sync: false          # set this in the Render dashboard, don't commit it
-      - key: OPENROUTER_MODEL
-        value: nvidia/nemotron-3-ultra-550b-a55b
+        value: groq                          # matches the rest of the Lumexa stack (CAD/FEA backend also runs GPT-OSS-120B via Groq)
+      - key: GROQ_API_KEY
+        sync: false                          # set this in the Render dashboard, don't commit it
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: AGENT_TURN_MAX_TOKENS
         value: "2000"
+
+# OpenRouter + Nemotron 3 Ultra is still fully supported (ai_client.py
+# hasn't changed) if you want to A/B test providers later — just set
+# AI_PROVIDER=openrouter and OPENROUTER_API_KEY instead of the above.

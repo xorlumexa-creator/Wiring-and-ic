@@ -119,7 +119,8 @@ before trusting a design for fabrication:
 
 ```bash
 pip install -r requirements.txt
-export OPENROUTER_API_KEY=sk-or-...
+export AI_PROVIDER=groq
+export GROQ_API_KEY=gsk_...
 uvicorn main:app --reload
 ```
 
@@ -141,20 +142,37 @@ gives you `viewer_url` directly).
 
 | Var | Default | Notes |
 |---|---|---|
-| `AI_PROVIDER` | `openrouter` | or `groq` |
-| `OPENROUTER_API_KEY` | — | required if using OpenRouter |
-| `OPENROUTER_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b` | verify current id/pricing on OpenRouter before deploying |
-| `GROQ_API_KEY` | — | only if `AI_PROVIDER=groq` |
+| `AI_PROVIDER` | `groq` | matches the rest of the Lumexa stack (CAD/FEA backend); `openrouter` also supported |
+| `GROQ_API_KEY` | — | required with the default provider |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | — | only if you switch `AI_PROVIDER=openrouter` |
 | `AGENT_TURN_MAX_TOKENS` | `2000` | per-turn token cap for the tool-calling loop |
 
 ## Deploying to Render (free tier)
 
-`render.yaml` is included — connect the repo in the Render dashboard,
-it'll pick it up, then set `OPENROUTER_API_KEY` in the dashboard (kept out
-of the yaml on purpose). Render's free tier is 512MB RAM **and 0.1 vCPU**
-— the CPU allocation is the tighter constraint in practice, which is why
+`render.yaml` is included and uses Render's **native Python buildpack**
+(`env: python`) — no Dockerfile, deliberately (see requirements.txt's
+comment on why plain `pip install` is enough here, unlike `lumexa-ic`).
+Connect the repo in the Render dashboard, it'll pick up `render.yaml`,
+then set `GROQ_API_KEY` in the dashboard (kept out of the yaml on
+purpose). Render's free tier is 512MB RAM **and 0.1 vCPU** — the CPU
+allocation is the tighter constraint in practice, which is why
 `spatial.py` and `routing.py` are tuned the way they are (see next
 section).
+
+## Frontend integration (accformula / Lumexa app)
+
+The IC & Wire page (`src/pages/ICWirePage.tsx`) has an "MVP: Real 3D
+Placement Engine" section that calls this backend's `/design-electronics`
+directly from the browser (CORS is wide open on this service — see
+`main.py`). Wire it up:
+
+1. Deploy this repo to Render (above), copy its `https://*.onrender.com` URL.
+2. In the frontend repo's `.env`, set `VITE_ELECTRONICS_BACKEND_URL` to that URL.
+3. Rebuild/redeploy the frontend.
+
+That section is entirely separate from `VITE_BACKEND_URL` (the CAD/FEA
+generation backend) — different service, different job.
 
 ## Reliability pass — what changed and why
 
